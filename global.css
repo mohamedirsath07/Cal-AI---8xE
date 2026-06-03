@@ -1,0 +1,35 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  html {
+    @apply bg-black text-white;
+  }
+
+  body {
+    @apply bg-black;
+  }
+}
+
+@layer components {
+  .glassmorphic {
+    @apply backdrop-blur-xl bg-white/10 border border-white/20 rounded-xl;
+  }
+
+  .gradient-primary {
+    @apply bg-gradient-to-r from-red-500 to-red-400;
+  }
+
+  .card-container {
+    @apply rounded-2xl border border-white/10 overflow-hidden;
+  }
+
+  .flex-center {
+    @apply flex items-center justify-center;
+  }
+
+  .text-primary {
+    @apply text-red-500;
+  }
+}
