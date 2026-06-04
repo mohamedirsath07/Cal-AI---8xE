@@ -18,6 +18,7 @@
       "@lib/*": ["./lib/*"],
       "@types/*": ["./types/*"],
       "@hooks/*": ["./hooks/*"],
+      "@services/*": ["./services/*"],
     },
   },
   "include": ["**/*.ts", "**/*.tsx"],

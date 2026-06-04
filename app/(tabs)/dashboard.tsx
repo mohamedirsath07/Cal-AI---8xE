@@ -1,279 +1,1041 @@
-import React, { useState } from 'react';
-import { View, ScrollView, Text, TouchableOpacity, Dimensions } from 'react-native';
+import React, { useEffect, useRef } from 'react';
+import {
+  View,
+  ScrollView,
+  Text,
+  TouchableOpacity,
+  Dimensions,
+  Animated,
+  Platform,
+  StatusBar,
+} from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { BlurView } from 'expo-blur';
 import { useRouter } from 'expo-router';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
-import Svg, { Circle, Text as SvgText } from 'react-native-svg';
+import Svg, {
+  Circle,
+  Defs,
+  LinearGradient as SvgLinearGradient,
+  Stop,
+} from 'react-native-svg';
 
-const { width } = Dimensions.get('window');
+const { width: SCREEN_WIDTH } = Dimensions.get('window');
 
-interface MacroRingProps {
-  value: number;
-  target: number;
-  label: string;
-  color: string;
-  size: number;
+// ─── Design Tokens ────────────────────────────────────────────────────────────
+
+const COLORS = {
+  bg: '#000000',
+  surface: '#0D0D0D',
+  card: 'rgba(255,255,255,0.04)',
+  cardBorder: 'rgba(255,255,255,0.08)',
+  accent: '#FF5252',
+  accentSoft: 'rgba(255, 82, 82, 0.12)',
+  protein: '#6366F1',     // Indigo
+  proteinGlow: 'rgba(99,102,241,0.25)',
+  carbs: '#F59E0B',       // Amber
+  carbsGlow: 'rgba(245,158,11,0.25)',
+  fat: '#EC4899',         // Pink
+  fatGlow: 'rgba(236,72,153,0.25)',
+  streak: '#F97316',      // Orange
+  streakGlow: 'rgba(249,115,22,0.20)',
+  success: '#22C55E',
+  white: '#FFFFFF',
+  gray100: 'rgba(255,255,255,0.87)',
+  gray200: 'rgba(255,255,255,0.60)',
+  gray300: 'rgba(255,255,255,0.38)',
+  gray400: 'rgba(255,255,255,0.20)',
+  gray500: 'rgba(255,255,255,0.08)',
+};
+
+// ─── Mock Data ────────────────────────────────────────────────────────────────
+
+const MOCK = {
+  userName: 'Alex',
+  calories: { current: 1847, goal: 2500 },
+  protein: { current: 124, goal: 150, unit: 'g' },
+  carbs: { current: 198, goal: 280, unit: 'g' },
+  fat: { current: 58, goal: 85, unit: 'g' },
+  streak: { current: 14, best: 21 },
+  weekActivity: [true, true, true, false, true, true, true], // Mon–Sun
+  meals: [
+    {
+      id: '1',
+      name: 'Grilled Salmon Bowl',
+      emoji: '🍣',
+      calories: 520,
+      protein: 42,
+      carbs: 38,
+      fat: 22,
+      time: '12:30 PM',
+      timeAgo: '1h ago',
+    },
+    {
+      id: '2',
+      name: 'Greek Yogurt Parfait',
+      emoji: '🥣',
+      calories: 310,
+      protein: 28,
+      carbs: 34,
+      fat: 8,
+      time: '9:15 AM',
+      timeAgo: '4h ago',
+    },
+    {
+      id: '3',
+      name: 'Protein Smoothie',
+      emoji: '🥤',
+      calories: 280,
+      protein: 32,
+      carbs: 24,
+      fat: 6,
+      time: '7:45 AM',
+      timeAgo: '6h ago',
+    },
+    {
+      id: '4',
+      name: 'Chicken Caesar Wrap',
+      emoji: '🌯',
+      calories: 420,
+      protein: 36,
+      carbs: 32,
+      fat: 16,
+      time: 'Yesterday',
+      timeAgo: 'Yesterday',
+    },
+    {
+      id: '5',
+      name: 'Overnight Oats',
+      emoji: '🥣',
+      calories: 317,
+      protein: 14,
+      carbs: 48,
+      fat: 9,
+      time: 'Yesterday',
+      timeAgo: 'Yesterday',
+    },
+  ],
+};
+
+// ─── Helper ───────────────────────────────────────────────────────────────────
+
+function getGreeting(): string {
+  const h = new Date().getHours();
+  if (h < 12) return 'Good Morning';
+  if (h < 17) return 'Good Afternoon';
+  return 'Good Evening';
 }
 
-function MacroRing({ value, target, label, color, size }: MacroRingProps) {
-  const radius = (size - 12) / 2;
-  const circumference = 2 * Math.PI * radius;
-  const offset = circumference - (Math.min(value / target, 1) * circumference);
-  const percentage = Math.round((value / target) * 100);
+function formatNum(n: number): string {
+  return n.toLocaleString();
+}
+
+// ─── Animated Calorie Ring ────────────────────────────────────────────────────
+
+interface CalorieRingProps {
+  current: number;
+  goal: number;
+}
+
+const RING_SIZE = 200;
+const RING_STROKE = 14;
+const RING_RADIUS = (RING_SIZE - RING_STROKE) / 2;
+const RING_CIRCUMFERENCE = 2 * Math.PI * RING_RADIUS;
+
+function CalorieRing({ current, goal }: CalorieRingProps) {
+  const progress = Math.min(current / goal, 1);
+  const dashOffset = RING_CIRCUMFERENCE * (1 - progress);
+  const fadeAnim = useRef(new Animated.Value(0)).current;
+  const scaleAnim = useRef(new Animated.Value(0.9)).current;
+
+  useEffect(() => {
+    Animated.parallel([
+      Animated.timing(fadeAnim, {
+        toValue: 1,
+        duration: 800,
+        useNativeDriver: true,
+      }),
+      Animated.spring(scaleAnim, {
+        toValue: 1,
+        friction: 8,
+        tension: 40,
+        useNativeDriver: true,
+      }),
+    ]).start();
+  }, []);
 
   return (
-    <View className="items-center gap-3">
-      <View style={{ width: size, height: size, position: 'relative' }}>
-        <Svg width={size} height={size} style={{ position: 'absolute' }}>
-          {/* Background circle */}
+    <Animated.View
+      style={{
+        opacity: fadeAnim,
+        transform: [{ scale: scaleAnim }],
+        alignItems: 'center',
+        justifyContent: 'center',
+      }}
+    >
+      <View style={{ width: RING_SIZE, height: RING_SIZE }}>
+        <Svg width={RING_SIZE} height={RING_SIZE}>
+          <Defs>
+            <SvgLinearGradient id="calorieGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+              <Stop offset="0%" stopColor="#FF6B6B" />
+              <Stop offset="50%" stopColor="#FF5252" />
+              <Stop offset="100%" stopColor="#E84393" />
+            </SvgLinearGradient>
+          </Defs>
+
+          {/* Track */}
           <Circle
-            cx={size / 2}
-            cy={size / 2}
-            r={radius}
-            stroke="rgba(255, 255, 255, 0.1)"
-            strokeWidth="8"
+            cx={RING_SIZE / 2}
+            cy={RING_SIZE / 2}
+            r={RING_RADIUS}
+            stroke={COLORS.gray500}
+            strokeWidth={RING_STROKE}
             fill="none"
           />
-          {/* Progress circle */}
+
+          {/* Progress */}
           <Circle
-            cx={size / 2}
-            cy={size / 2}
-            r={radius}
-            stroke={color}
-            strokeWidth="8"
+            cx={RING_SIZE / 2}
+            cy={RING_SIZE / 2}
+            r={RING_RADIUS}
+            stroke="url(#calorieGrad)"
+            strokeWidth={RING_STROKE}
             fill="none"
-            strokeDasharray={circumference}
-            strokeDashoffset={offset}
+            strokeDasharray={RING_CIRCUMFERENCE}
+            strokeDashoffset={dashOffset}
             strokeLinecap="round"
-            style={{
-              transform: `rotate(-90deg)`,
-              transformOrigin: `${size / 2}px ${size / 2}px`,
-              transitionDuration: '500ms',
-            }}
+            rotation={-90}
+            origin={`${RING_SIZE / 2}, ${RING_SIZE / 2}`}
           />
         </Svg>
-        {/* Center text */}
+
+        {/* Center Label */}
         <View className="absolute inset-0 items-center justify-center">
-          <Text className="text-white font-bold text-lg">{value}g</Text>
-          <Text className="text-gray-500 text-xs">{percentage}%</Text>
+          <Text
+            style={{
+              fontSize: 44,
+              fontWeight: '800',
+              color: COLORS.white,
+              letterSpacing: -1.5,
+            }}
+          >
+            {formatNum(current)}
+          </Text>
+          <Text
+            style={{
+              fontSize: 13,
+              fontWeight: '500',
+              color: COLORS.gray300,
+              letterSpacing: 1.5,
+              marginTop: 2,
+            }}
+          >
+            KCAL
+          </Text>
         </View>
       </View>
-      <Text className="text-gray-400 text-sm">{label}</Text>
+    </Animated.View>
+  );
+}
+
+// ─── Macro Progress Ring ──────────────────────────────────────────────────────
+
+interface MacroRingProps {
+  current: number;
+  goal: number;
+  label: string;
+  unit: string;
+  color: string;
+  glowColor: string;
+  gradientEnd: string;
+  delay?: number;
+}
+
+const MACRO_SIZE = 90;
+const MACRO_STROKE = 7;
+const MACRO_RADIUS = (MACRO_SIZE - MACRO_STROKE) / 2;
+const MACRO_CIRCUMFERENCE = 2 * Math.PI * MACRO_RADIUS;
+
+function MacroProgressRing({
+  current,
+  goal,
+  label,
+  unit,
+  color,
+  glowColor,
+  gradientEnd,
+  delay = 0,
+}: MacroRingProps) {
+  const progress = Math.min(current / goal, 1);
+  const dashOffset = MACRO_CIRCUMFERENCE * (1 - progress);
+  const percentage = Math.round(progress * 100);
+  const gradientId = `macro_${label}`;
+
+  const fadeAnim = useRef(new Animated.Value(0)).current;
+  const translateAnim = useRef(new Animated.Value(20)).current;
+
+  useEffect(() => {
+    Animated.parallel([
+      Animated.timing(fadeAnim, {
+        toValue: 1,
+        duration: 600,
+        delay,
+        useNativeDriver: true,
+      }),
+      Animated.timing(translateAnim, {
+        toValue: 0,
+        duration: 600,
+        delay,
+        useNativeDriver: true,
+      }),
+    ]).start();
+  }, []);
+
+  return (
+    <Animated.View
+      style={{
+        opacity: fadeAnim,
+        transform: [{ translateY: translateAnim }],
+        alignItems: 'center',
+        flex: 1,
+      }}
+    >
+      {/* Glow effect */}
+      <View
+        style={{
+          position: 'absolute',
+          top: 8,
+          width: MACRO_SIZE - 10,
+          height: MACRO_SIZE - 10,
+          borderRadius: (MACRO_SIZE - 10) / 2,
+          backgroundColor: glowColor,
+          ...(Platform.OS === 'ios' ? {
+            shadowColor: color,
+            shadowOffset: { width: 0, height: 0 },
+            shadowOpacity: 0.4,
+            shadowRadius: 20,
+          } : { elevation: 8 }),
+        }}
+      />
+
+      <View style={{ width: MACRO_SIZE, height: MACRO_SIZE }}>
+        <Svg width={MACRO_SIZE} height={MACRO_SIZE}>
+          <Defs>
+            <SvgLinearGradient id={gradientId} x1="0%" y1="0%" x2="100%" y2="100%">
+              <Stop offset="0%" stopColor={color} />
+              <Stop offset="100%" stopColor={gradientEnd} />
+            </SvgLinearGradient>
+          </Defs>
+
+          <Circle
+            cx={MACRO_SIZE / 2}
+            cy={MACRO_SIZE / 2}
+            r={MACRO_RADIUS}
+            stroke={COLORS.gray500}
+            strokeWidth={MACRO_STROKE}
+            fill="none"
+          />
+          <Circle
+            cx={MACRO_SIZE / 2}
+            cy={MACRO_SIZE / 2}
+            r={MACRO_RADIUS}
+            stroke={`url(#${gradientId})`}
+            strokeWidth={MACRO_STROKE}
+            fill="none"
+            strokeDasharray={MACRO_CIRCUMFERENCE}
+            strokeDashoffset={dashOffset}
+            strokeLinecap="round"
+            rotation={-90}
+            origin={`${MACRO_SIZE / 2}, ${MACRO_SIZE / 2}`}
+          />
+        </Svg>
+
+        <View className="absolute inset-0 items-center justify-center">
+          <Text style={{ fontSize: 18, fontWeight: '700', color: COLORS.white }}>
+            {current}
+          </Text>
+          <Text style={{ fontSize: 10, color: COLORS.gray300, marginTop: -1 }}>
+            {unit}
+          </Text>
+        </View>
+      </View>
+
+      <Text
+        style={{
+          fontSize: 12,
+          fontWeight: '600',
+          color: COLORS.gray200,
+          marginTop: 8,
+        }}
+      >
+        {label}
+      </Text>
+      <Text style={{ fontSize: 11, color: COLORS.gray300, marginTop: 2 }}>
+        {percentage}% of {goal}{unit}
+      </Text>
+    </Animated.View>
+  );
+}
+
+// ─── Streak Card ──────────────────────────────────────────────────────────────
+
+interface StreakCardProps {
+  streak: number;
+  best: number;
+  weekActivity: boolean[];
+}
+
+const DAYS = ['M', 'T', 'W', 'T', 'F', 'S', 'S'];
+
+function StreakCard({ streak, best, weekActivity }: StreakCardProps) {
+  const fadeAnim = useRef(new Animated.Value(0)).current;
+  const slideAnim = useRef(new Animated.Value(30)).current;
+
+  useEffect(() => {
+    Animated.parallel([
+      Animated.timing(fadeAnim, {
+        toValue: 1,
+        duration: 700,
+        delay: 400,
+        useNativeDriver: true,
+      }),
+      Animated.timing(slideAnim, {
+        toValue: 0,
+        duration: 700,
+        delay: 400,
+        useNativeDriver: true,
+      }),
+    ]).start();
+  }, []);
+
+  return (
+    <Animated.View
+      style={{
+        opacity: fadeAnim,
+        transform: [{ translateY: slideAnim }],
+      }}
+    >
+      <View
+        style={{
+          borderRadius: 24,
+          overflow: 'hidden',
+          borderWidth: 1,
+          borderColor: COLORS.cardBorder,
+        }}
+      >
+        <BlurView intensity={20} tint="dark">
+          <LinearGradient
+            colors={[
+              'rgba(249, 115, 22, 0.12)',
+              'rgba(249, 115, 22, 0.03)',
+              'rgba(0,0,0,0)',
+            ]}
+            start={{ x: 0, y: 0 }}
+            end={{ x: 1, y: 1 }}
+          >
+            <View style={{ padding: 20 }}>
+              {/* Top row */}
+              <View className="flex-row items-center justify-between mb-5">
+                <View className="flex-row items-center" style={{ gap: 14 }}>
+                  <View
+                    style={{
+                      width: 52,
+                      height: 52,
+                      borderRadius: 26,
+                      backgroundColor: COLORS.streakGlow,
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      borderWidth: 1.5,
+                      borderColor: 'rgba(249,115,22,0.35)',
+                    }}
+                  >
+                    <Text style={{ fontSize: 26 }}>🔥</Text>
+                  </View>
+                  <View>
+                    <Text style={{ fontSize: 13, color: COLORS.gray300, fontWeight: '500' }}>
+                      Current Streak
+                    </Text>
+                    <View className="flex-row items-baseline" style={{ gap: 4 }}>
+                      <Text
+                        style={{
+                          fontSize: 32,
+                          fontWeight: '800',
+                          color: COLORS.white,
+                          letterSpacing: -0.5,
+                        }}
+                      >
+                        {streak}
+                      </Text>
+                      <Text
+                        style={{
+                          fontSize: 14,
+                          fontWeight: '600',
+                          color: COLORS.gray300,
+                        }}
+                      >
+                        days
+                      </Text>
+                    </View>
+                  </View>
+                </View>
+                <View style={{ alignItems: 'flex-end' }}>
+                  <Text style={{ fontSize: 11, color: COLORS.gray300, fontWeight: '500' }}>
+                    BEST
+                  </Text>
+                  <Text style={{ fontSize: 18, fontWeight: '700', color: COLORS.streak }}>
+                    {best}
+                  </Text>
+                </View>
+              </View>
+
+              {/* Week dots */}
+              <View
+                className="flex-row justify-between"
+                style={{
+                  backgroundColor: COLORS.gray500,
+                  borderRadius: 14,
+                  paddingVertical: 12,
+                  paddingHorizontal: 16,
+                }}
+              >
+                {weekActivity.map((active, i) => (
+                  <View key={i} style={{ alignItems: 'center', gap: 6 }}>
+                    <Text style={{ fontSize: 11, color: COLORS.gray300, fontWeight: '600' }}>
+                      {DAYS[i]}
+                    </Text>
+                    <View
+                      style={{
+                        width: 28,
+                        height: 28,
+                        borderRadius: 14,
+                        backgroundColor: active ? COLORS.streak : 'rgba(255,255,255,0.06)',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        ...(active && Platform.OS === 'ios'
+                          ? {
+                              shadowColor: COLORS.streak,
+                              shadowOffset: { width: 0, height: 0 },
+                              shadowOpacity: 0.5,
+                              shadowRadius: 8,
+                            }
+                          : {}),
+                      }}
+                    >
+                      {active && (
+                        <MaterialCommunityIcons name="check" size={14} color={COLORS.white} />
+                      )}
+                    </View>
+                  </View>
+                ))}
+              </View>
+            </View>
+          </LinearGradient>
+        </BlurView>
+      </View>
+    </Animated.View>
+  );
+}
+
+// ─── Meal Item ────────────────────────────────────────────────────────────────
+
+interface MealItemProps {
+  emoji: string;
+  name: string;
+  calories: number;
+  protein: number;
+  carbs: number;
+  fat: number;
+  timeAgo: string;
+  index: number;
+}
+
+function MealItem({ emoji, name, calories, protein, carbs, fat, timeAgo, index }: MealItemProps) {
+  const fadeAnim = useRef(new Animated.Value(0)).current;
+  const slideAnim = useRef(new Animated.Value(20)).current;
+
+  useEffect(() => {
+    Animated.parallel([
+      Animated.timing(fadeAnim, {
+        toValue: 1,
+        duration: 500,
+        delay: 600 + index * 100,
+        useNativeDriver: true,
+      }),
+      Animated.timing(slideAnim, {
+        toValue: 0,
+        duration: 500,
+        delay: 600 + index * 100,
+        useNativeDriver: true,
+      }),
+    ]).start();
+  }, []);
+
+  return (
+    <Animated.View style={{ opacity: fadeAnim, transform: [{ translateY: slideAnim }] }}>
+      <TouchableOpacity activeOpacity={0.7}>
+        <View
+          style={{
+            borderRadius: 20,
+            overflow: 'hidden',
+            borderWidth: 1,
+            borderColor: COLORS.cardBorder,
+            marginBottom: 10,
+          }}
+        >
+          <BlurView intensity={12} tint="dark">
+            <LinearGradient
+              colors={['rgba(255,255,255,0.06)', 'rgba(255,255,255,0.02)']}
+              start={{ x: 0, y: 0 }}
+              end={{ x: 1, y: 1 }}
+            >
+              <View style={{ padding: 16 }}>
+                <View className="flex-row items-center justify-between">
+                  {/* Left side */}
+                  <View className="flex-row items-center flex-1" style={{ gap: 14 }}>
+                    <View
+                      style={{
+                        width: 48,
+                        height: 48,
+                        borderRadius: 16,
+                        backgroundColor: COLORS.gray500,
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                      }}
+                    >
+                      <Text style={{ fontSize: 24 }}>{emoji}</Text>
+                    </View>
+                    <View style={{ flex: 1 }}>
+                      <Text
+                        style={{
+                          fontSize: 15,
+                          fontWeight: '600',
+                          color: COLORS.white,
+                          marginBottom: 3,
+                        }}
+                        numberOfLines={1}
+                      >
+                        {name}
+                      </Text>
+                      <Text style={{ fontSize: 12, color: COLORS.gray300 }}>
+                        {timeAgo}
+                      </Text>
+                    </View>
+                  </View>
+
+                  {/* Right side – Calories */}
+                  <View style={{ alignItems: 'flex-end' }}>
+                    <Text
+                      style={{
+                        fontSize: 20,
+                        fontWeight: '700',
+                        color: COLORS.accent,
+                      }}
+                    >
+                      {calories}
+                    </Text>
+                    <Text style={{ fontSize: 11, color: COLORS.gray300 }}>kcal</Text>
+                  </View>
+                </View>
+
+                {/* Macro pills */}
+                <View className="flex-row" style={{ gap: 8, marginTop: 12 }}>
+                  <MacroPill label="P" value={protein} color={COLORS.protein} />
+                  <MacroPill label="C" value={carbs} color={COLORS.carbs} />
+                  <MacroPill label="F" value={fat} color={COLORS.fat} />
+                </View>
+              </View>
+            </LinearGradient>
+          </BlurView>
+        </View>
+      </TouchableOpacity>
+    </Animated.View>
+  );
+}
+
+function MacroPill({ label, value, color }: { label: string; value: number; color: string }) {
+  return (
+    <View
+      style={{
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 5,
+        backgroundColor: `${color}15`,
+        paddingHorizontal: 10,
+        paddingVertical: 5,
+        borderRadius: 10,
+      }}
+    >
+      <View
+        style={{
+          width: 6,
+          height: 6,
+          borderRadius: 3,
+          backgroundColor: color,
+        }}
+      />
+      <Text style={{ fontSize: 12, fontWeight: '600', color: COLORS.gray200 }}>
+        {label} {value}g
+      </Text>
     </View>
   );
 }
 
+// ─── Quick Stats Row ──────────────────────────────────────────────────────────
+
+interface QuickStatProps {
+  icon: string;
+  label: string;
+  value: string;
+  color: string;
+}
+
+function QuickStat({ icon, label, value, color }: QuickStatProps) {
+  return (
+    <View
+      style={{
+        flex: 1,
+        backgroundColor: COLORS.gray500,
+        borderRadius: 16,
+        padding: 14,
+        alignItems: 'center',
+        gap: 6,
+        borderWidth: 1,
+        borderColor: COLORS.cardBorder,
+      }}
+    >
+      <MaterialCommunityIcons name={icon as any} size={20} color={color} />
+      <Text style={{ fontSize: 16, fontWeight: '700', color: COLORS.white }}>
+        {value}
+      </Text>
+      <Text style={{ fontSize: 11, color: COLORS.gray300, fontWeight: '500' }}>
+        {label}
+      </Text>
+    </View>
+  );
+}
+
+// ─── Dashboard Screen ─────────────────────────────────────────────────────────
+
 export default function Dashboard() {
   const router = useRouter();
-  const [calories, setCalories] = useState(1850);
-  const [protein, setProtein] = useState(120);
-  const [carbs, setCarbs] = useState(210);
-  const [fat, setFat] = useState(65);
-  const [streak, setStreak] = useState(12);
 
-  const targets = { calories: 2500, protein: 150, carbs: 300, fat: 85 };
-  const caloriePercent = Math.min((calories / targets.calories) * 100, 100);
-  const calorieRemaining = Math.max(targets.calories - calories, 0);
+  const { calories, protein, carbs, fat, streak, weekActivity, meals, userName } = MOCK;
+  const remaining = Math.max(calories.goal - calories.current, 0);
+  const burned = 340; // mock exercise burn
 
-  const recentMeals = [
-    { id: 1, name: 'Grilled Chicken Salad', calories: 320, time: '2 hours ago', icon: '🥗' },
-    { id: 2, name: 'Protein Smoothie', calories: 280, time: '5 hours ago', icon: '🥤' },
-    { id: 3, name: 'Brown Rice Bowl', calories: 450, time: 'Yesterday', icon: '🍚' },
-  ];
+  // Pulsing FAB animation
+  const pulseAnim = useRef(new Animated.Value(1)).current;
+  useEffect(() => {
+    Animated.loop(
+      Animated.sequence([
+        Animated.timing(pulseAnim, {
+          toValue: 1.06,
+          duration: 1200,
+          useNativeDriver: true,
+        }),
+        Animated.timing(pulseAnim, {
+          toValue: 1,
+          duration: 1200,
+          useNativeDriver: true,
+        }),
+      ])
+    ).start();
+  }, []);
 
   return (
-    <View className="flex-1 bg-black">
-      <ScrollView 
-        className="flex-1" 
+    <View className="flex-1" style={{ backgroundColor: COLORS.bg }}>
+      <StatusBar barStyle="light-content" />
+
+      <ScrollView
+        className="flex-1"
         showsVerticalScrollIndicator={false}
-        contentContainerStyle={{ paddingBottom: 20 }}
+        contentContainerStyle={{ paddingBottom: 100 }}
       >
-        {/* Header */}
-        <View className="px-6 pt-12 pb-8">
+        {/* ───── Header ───── */}
+        <View style={{ paddingHorizontal: 24, paddingTop: Platform.OS === 'ios' ? 60 : 48, paddingBottom: 8 }}>
           <View className="flex-row justify-between items-center">
             <View>
-              <Text className="text-gray-400 text-sm">Today's Summary</Text>
-              <Text className="text-white text-4xl font-bold mt-1">CalAI</Text>
+              <Text style={{ fontSize: 14, color: COLORS.gray300, fontWeight: '500' }}>
+                {getGreeting()} 👋
+              </Text>
+              <Text
+                style={{
+                  fontSize: 30,
+                  fontWeight: '800',
+                  color: COLORS.white,
+                  marginTop: 2,
+                  letterSpacing: -0.5,
+                }}
+              >
+                {userName}
+              </Text>
             </View>
-            <TouchableOpacity className="w-12 h-12 rounded-full bg-red-500/10 items-center justify-center border border-red-500/20">
-              <MaterialCommunityIcons name="bell" size={24} color="#FF6B6B" />
-            </TouchableOpacity>
+            <View className="flex-row" style={{ gap: 10 }}>
+              <TouchableOpacity
+                style={{
+                  width: 44,
+                  height: 44,
+                  borderRadius: 22,
+                  backgroundColor: COLORS.gray500,
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  borderWidth: 1,
+                  borderColor: COLORS.cardBorder,
+                }}
+              >
+                <MaterialCommunityIcons name="bell-outline" size={22} color={COLORS.gray200} />
+              </TouchableOpacity>
+              <TouchableOpacity
+                onPress={() => router.push('/(tabs)/profile')}
+                style={{
+                  width: 44,
+                  height: 44,
+                  borderRadius: 22,
+                  backgroundColor: COLORS.accentSoft,
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  borderWidth: 1,
+                  borderColor: 'rgba(255,82,82,0.25)',
+                }}
+              >
+                <MaterialCommunityIcons name="account" size={22} color={COLORS.accent} />
+              </TouchableOpacity>
+            </View>
           </View>
         </View>
 
-        {/* Main Calorie Card */}
-        <View className="px-6 mb-8">
-          <BlurView intensity={25} className="rounded-3xl overflow-hidden border border-white/10">
-            <LinearGradient
-              colors={['rgba(255, 107, 107, 0.15)', 'rgba(139, 92, 246, 0.05)']}
-              start={{ x: 0, y: 0 }}
-              end={{ x: 1, y: 1 }}
+        {/* ───── Main Calorie Card ───── */}
+        <View style={{ paddingHorizontal: 24, marginTop: 20 }}>
+          <View
+            style={{
+              borderRadius: 28,
+              overflow: 'hidden',
+              borderWidth: 1,
+              borderColor: COLORS.cardBorder,
+            }}
+          >
+            <BlurView intensity={25} tint="dark">
+              <LinearGradient
+                colors={[
+                  'rgba(255, 82, 82, 0.10)',
+                  'rgba(139, 92, 246, 0.04)',
+                  'rgba(0,0,0,0)',
+                ]}
+                start={{ x: 0, y: 0 }}
+                end={{ x: 1, y: 1 }}
+              >
+                <View style={{ padding: 28, alignItems: 'center' }}>
+                  <Text
+                    style={{
+                      fontSize: 12,
+                      fontWeight: '600',
+                      color: COLORS.gray300,
+                      letterSpacing: 2,
+                      marginBottom: 20,
+                    }}
+                  >
+                    TODAY'S INTAKE
+                  </Text>
+
+                  <CalorieRing current={calories.current} goal={calories.goal} />
+
+                  {/* Stats row under ring */}
+                  <View
+                    className="flex-row"
+                    style={{
+                      gap: 10,
+                      marginTop: 24,
+                      width: '100%',
+                    }}
+                  >
+                    <QuickStat
+                      icon="flag-checkered"
+                      label="Goal"
+                      value={`${formatNum(calories.goal)}`}
+                      color={COLORS.success}
+                    />
+                    <QuickStat
+                      icon="silverware-fork-knife"
+                      label="Remaining"
+                      value={`${formatNum(remaining)}`}
+                      color={COLORS.carbs}
+                    />
+                    <QuickStat
+                      icon="fire"
+                      label="Burned"
+                      value={`${burned}`}
+                      color={COLORS.accent}
+                    />
+                  </View>
+                </View>
+              </LinearGradient>
+            </BlurView>
+          </View>
+        </View>
+
+        {/* ───── Macronutrient Rings ───── */}
+        <View style={{ paddingHorizontal: 24, marginTop: 28 }}>
+          <Text
+            style={{
+              fontSize: 12,
+              fontWeight: '600',
+              color: COLORS.gray300,
+              letterSpacing: 2,
+              marginBottom: 18,
+            }}
+          >
+            MACRONUTRIENTS
+          </Text>
+
+          <View
+            style={{
+              borderRadius: 24,
+              overflow: 'hidden',
+              borderWidth: 1,
+              borderColor: COLORS.cardBorder,
+            }}
+          >
+            <BlurView intensity={15} tint="dark">
+              <View
+                className="flex-row justify-around"
+                style={{ paddingVertical: 24, paddingHorizontal: 12 }}
+              >
+                <MacroProgressRing
+                  current={protein.current}
+                  goal={protein.goal}
+                  label="Protein"
+                  unit="g"
+                  color={COLORS.protein}
+                  glowColor={COLORS.proteinGlow}
+                  gradientEnd="#818CF8"
+                  delay={100}
+                />
+                <MacroProgressRing
+                  current={carbs.current}
+                  goal={carbs.goal}
+                  label="Carbs"
+                  unit="g"
+                  color={COLORS.carbs}
+                  glowColor={COLORS.carbsGlow}
+                  gradientEnd="#FBBF24"
+                  delay={200}
+                />
+                <MacroProgressRing
+                  current={fat.current}
+                  goal={fat.goal}
+                  label="Fat"
+                  unit="g"
+                  color={COLORS.fat}
+                  glowColor={COLORS.fatGlow}
+                  gradientEnd="#F472B6"
+                  delay={300}
+                />
+              </View>
+            </BlurView>
+          </View>
+        </View>
+
+        {/* ───── Streak Card ───── */}
+        <View style={{ paddingHorizontal: 24, marginTop: 28 }}>
+          <Text
+            style={{
+              fontSize: 12,
+              fontWeight: '600',
+              color: COLORS.gray300,
+              letterSpacing: 2,
+              marginBottom: 18,
+            }}
+          >
+            YOUR STREAK
+          </Text>
+
+          <StreakCard
+            streak={streak.current}
+            best={streak.best}
+            weekActivity={weekActivity}
+          />
+        </View>
+
+        {/* ───── Recent Meals ───── */}
+        <View style={{ paddingHorizontal: 24, marginTop: 28 }}>
+          <View className="flex-row justify-between items-center" style={{ marginBottom: 18 }}>
+            <Text
+              style={{
+                fontSize: 12,
+                fontWeight: '600',
+                color: COLORS.gray300,
+                letterSpacing: 2,
+              }}
             >
-              <View className="p-8 items-center">
-                <Text className="text-gray-400 text-sm mb-4">DAILY CALORIES</Text>
-                
-                {/* Calorie Ring */}
-                <View className="mb-6">
-                  <Svg width={180} height={180}>
-                    {/* Background circle */}
-                    <Circle
-                      cx="90"
-                      cy="90"
-                      r="75"
-                      stroke="rgba(255, 255, 255, 0.1)"
-                      strokeWidth="12"
-                      fill="none"
-                    />
-                    {/* Progress circle */}
-                    <Circle
-                      cx="90"
-                      cy="90"
-                      r="75"
-                      stroke="url(#grad)"
-                      strokeWidth="12"
-                      fill="none"
-                      strokeDasharray={`${(caloriePercent / 100) * 471} 471`}
-                      strokeLinecap="round"
-                      style={{
-                        transform: 'rotate(-90deg)',
-                        transformOrigin: '90px 90px',
-                      }}
-                    />
-                    <defs>
-                      <linearGradient id="grad" x1="0%" y1="0%" x2="100%" y2="100%">
-                        <stop offset="0%" stopColor="#FF6B6B" />
-                        <stop offset="100%" stopColor="#FF5252" />
-                      </linearGradient>
-                    </defs>
-                  </Svg>
-                  
-                  {/* Center content */}
-                  <View className="absolute inset-0 items-center justify-center">
-                    <View className="items-center">
-                      <Text className="text-5xl font-bold text-white">{calories}</Text>
-                      <Text className="text-gray-400 text-sm mt-2">kcal</Text>
-                    </View>
-                  </View>
-                </View>
-
-                {/* Calorie Details */}
-                <View className="w-full gap-3">
-                  <View className="flex-row justify-between items-center bg-white/5 rounded-xl px-4 py-3">
-                    <View className="flex-row items-center gap-2">
-                      <MaterialCommunityIcons name="target" size={20} color="#4ADE80" />
-                      <Text className="text-gray-400 text-sm">Goal</Text>
-                    </View>
-                    <Text className="text-white font-semibold">{targets.calories} kcal</Text>
-                  </View>
-
-                  <View className="flex-row justify-between items-center bg-white/5 rounded-xl px-4 py-3">
-                    <View className="flex-row items-center gap-2">
-                      <MaterialCommunityIcons name="plus" size={20} color="#8B5CF6" />
-                      <Text className="text-gray-400 text-sm">Remaining</Text>
-                    </View>
-                    <Text className="text-white font-semibold">{calorieRemaining} kcal</Text>
-                  </View>
-
-                  <View className="flex-row justify-between items-center bg-white/5 rounded-xl px-4 py-3">
-                    <View className="flex-row items-center gap-2">
-                      <MaterialCommunityIcons name="fire" size={20} color="#FF6B6B" />
-                      <Text className="text-gray-400 text-sm">Progress</Text>
-                    </View>
-                    <Text className="text-white font-semibold">{Math.round(caloriePercent)}%</Text>
-                  </View>
-                </View>
-              </View>
-            </LinearGradient>
-          </BlurView>
-        </View>
-
-        {/* Macronutrient Rings */}
-        <View className="px-6 mb-8">
-          <Text className="text-gray-400 text-sm mb-6">MACRONUTRIENTS</Text>
-          <View className="flex-row justify-around items-end gap-4">
-            <MacroRing value={protein} target={targets.protein} label="Protein" color="#4F46E5" size={120} />
-            <MacroRing value={carbs} target={targets.carbs} label="Carbs" color="#8B5CF6" size={120} />
-            <MacroRing value={fat} target={targets.fat} label="Fat" color="#EC4899" size={120} />
-          </View>
-        </View>
-
-        {/* Streak Card */}
-        <View className="px-6 mb-8">
-          <BlurView intensity={20} className="rounded-2xl overflow-hidden border border-white/10">
-            <LinearGradient colors={['rgba(74, 222, 128, 0.1)', 'rgba(74, 222, 128, 0.05)']}>
-              <View className="flex-row items-center justify-between p-6">
-                <View className="flex-row items-center gap-4">
-                  <View className="w-16 h-16 rounded-full bg-amber-500/20 items-center justify-center border-2 border-amber-500/30">
-                    <Text className="text-3xl">🔥</Text>
-                  </View>
-                  <View>
-                    <Text className="text-gray-400 text-sm">Current Streak</Text>
-                    <Text className="text-white text-3xl font-bold">{streak} days</Text>
-                  </View>
-                </View>
-                <View className="items-center">
-                  <MaterialCommunityIcons name="chevron-right" size={28} color="#888888" />
-                </View>
-              </View>
-            </LinearGradient>
-          </BlurView>
-        </View>
-
-        {/* Recent Meals */}
-        <View className="px-6 mb-6">
-          <View className="flex-row justify-between items-center mb-6">
-            <Text className="text-gray-400 text-sm font-semibold">RECENT MEALS</Text>
-            <TouchableOpacity onPress={() => router.push('/(tabs)/diary')}>
-              <View className="flex-row items-center gap-1">
-                <Text className="text-red-500 text-sm font-semibold">View All</Text>
-                <MaterialCommunityIcons name="arrow-right" size={14} color="#FF6B6B" />
-              </View>
+              RECENT MEALS
+            </Text>
+            <TouchableOpacity
+              onPress={() => router.push('/(tabs)/diary')}
+              className="flex-row items-center"
+              style={{ gap: 4 }}
+            >
+              <Text style={{ fontSize: 13, fontWeight: '600', color: COLORS.accent }}>
+                View All
+              </Text>
+              <MaterialCommunityIcons name="chevron-right" size={18} color={COLORS.accent} />
             </TouchableOpacity>
           </View>
 
-          <View className="gap-3">
-            {recentMeals.map((meal) => (
-              <BlurView key={meal.id} intensity={15} className="rounded-2xl overflow-hidden border border-white/10">
-                <LinearGradient colors={['rgba(255, 255, 255, 0.08)', 'rgba(255, 255, 255, 0.02)']}>
-                  <TouchableOpacity className="flex-row justify-between items-center p-4 active:opacity-70">
-                    <View className="flex-row items-center gap-4 flex-1">
-                      <Text className="text-3xl">{meal.icon}</Text>
-                      <View className="flex-1">
-                        <Text className="text-white font-semibold">{meal.name}</Text>
-                        <Text className="text-gray-500 text-xs mt-1">{meal.time}</Text>
-                      </View>
-                    </View>
-                    <View className="items-center gap-1">
-                      <Text className="text-red-500 font-bold text-lg">{meal.calories}</Text>
-                      <Text className="text-gray-600 text-xs">kcal</Text>
-                    </View>
-                  </TouchableOpacity>
-                </LinearGradient>
-              </BlurView>
-            ))}
-          </View>
+          {meals.map((meal, index) => (
+            <MealItem
+              key={meal.id}
+              emoji={meal.emoji}
+              name={meal.name}
+              calories={meal.calories}
+              protein={meal.protein}
+              carbs={meal.carbs}
+              fat={meal.fat}
+              timeAgo={meal.timeAgo}
+              index={index}
+            />
+          ))}
         </View>
+      </ScrollView>
 
-        {/* Quick Add Button */}
+      {/* ───── Floating Action Button ───── */}
+      <Animated.View
+        style={{
+          position: 'absolute',
+          bottom: Platform.OS === 'ios' ? 96 : 80,
+          right: 24,
+          transform: [{ scale: pulseAnim }],
+        }}
+      >
         <TouchableOpacity
           onPress={() => router.push('/camera')}
-          activeOpacity={0.8}
-          className="mx-6 mb-4"
+          activeOpacity={0.85}
+          style={{
+            ...(Platform.OS === 'ios'
+              ? {
+                  shadowColor: COLORS.accent,
+                  shadowOffset: { width: 0, height: 4 },
+                  shadowOpacity: 0.5,
+                  shadowRadius: 16,
+                }
+              : { elevation: 12 }),
+          }}
         >
           <LinearGradient
-            colors={['#FF6B6B', '#FF5252']}
+            colors={['#FF6B6B', '#FF5252', '#E84393']}
             start={{ x: 0, y: 0 }}
             end={{ x: 1, y: 1 }}
-            className="rounded-2xl py-5 shadow-lg"
+            style={{
+              width: 60,
+              height: 60,
+              borderRadius: 30,
+              alignItems: 'center',
+              justifyContent: 'center',
+            }}
           >
-            <View className="flex-row justify-center items-center gap-3">
-              <MaterialCommunityIcons name="plus" size={28} color="white" />
-              <Text className="text-white font-bold text-lg">Add Food</Text>
-            </View>
+            <MaterialCommunityIcons name="camera-plus" size={26} color={COLORS.white} />
           </LinearGradient>
         </TouchableOpacity>
-      </ScrollView>
+      </Animated.View>
     </View>
   );
 }
