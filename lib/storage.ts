@@ -1,6 +1,7 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import type { DailyLog, Meal, Food } from '../types';
 import dayjs from 'dayjs';
+import { updateStreak } from '../services/streak';
 
 /**
  * AsyncStorage service layer for persistent meal and nutrition data
@@ -91,6 +92,9 @@ export const saveMeal = async (meal: Meal): Promise<boolean> => {
         JSON.stringify([...dailyLogsList, today])
       );
     }
+
+    // Update daily streak
+    await updateStreak();
 
     return true;
   } catch (error) {
