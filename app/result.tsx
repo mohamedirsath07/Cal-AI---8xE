@@ -23,6 +23,8 @@ import Svg, {
   Stop,
 } from 'react-native-svg';
 import { saveMeal } from '../lib/storage';
+import { loadGoals, DEFAULT_GOALS } from '../lib/goals';
+import type { NutritionGoals } from '../lib/goals';
 import type { Meal, Food } from '../types';
 import dayjs from 'dayjs';
 
@@ -300,6 +302,7 @@ export default function ResultScreen() {
 
   const [isSaving, setIsSaving] = useState(false);
   const [isSaved, setIsSaved] = useState(false);
+  const [targets, setTargets] = useState<NutritionGoals>(DEFAULT_GOALS);
 
   // Parse params safely
   const imageUri = params.imageUri ?? '';
@@ -310,8 +313,10 @@ export default function ResultScreen() {
   const fat = Number(params.fat) || 0;
   const confidence = Number(params.confidence) || 0;
 
-  // Daily targets (for ring proportions)
-  const targets = { calories: 2500, protein: 150, carbs: 280, fat: 85 };
+  // Load user's daily targets from storage
+  useEffect(() => {
+    loadGoals().then(setTargets).catch(() => {});
+  }, []);
 
   // ── Animations ──
   const headerFade = useRef(new Animated.Value(0)).current;

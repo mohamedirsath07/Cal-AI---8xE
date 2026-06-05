@@ -17,6 +17,8 @@ import { useRouter } from 'expo-router';
 import { useFocusEffect } from 'expo-router';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { getTodayMeals, getMealsByDate, deleteMeal, calculateMacros } from '../../lib/storage';
+import { loadGoals, DEFAULT_GOALS } from '../../lib/goals';
+import type { NutritionGoals } from '../../lib/goals';
 import type { Meal, Food } from '../../types';
 import dayjs from 'dayjs';
 
@@ -450,6 +452,7 @@ export default function Diary() {
   const [meals, setMeals] = useState<Meal[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+  const [goals, setGoals] = useState<NutritionGoals>(DEFAULT_GOALS);
 
   // 7-day date range centered on today
   const dates = Array.from({ length: 7 }, (_, i) => dayjs().subtract(3 - i, 'day'));
@@ -461,13 +464,12 @@ export default function Diary() {
       const dateStr = selectedDate.format('YYYY-MM-DD');
       const todayStr = dayjs().format('YYYY-MM-DD');
 
-      let fetched: Meal[];
-      if (dateStr === todayStr) {
-        fetched = await getTodayMeals();
-      } else {
-        fetched = await getMealsByDate(dateStr);
-      }
+      const [fetched, g] = await Promise.all([
+        dateStr === todayStr ? getTodayMeals() : getMealsByDate(dateStr),
+        loadGoals(),
+      ]);
       setMeals(fetched);
+      setGoals(g);
     } catch (err) {
       console.error('Failed to load meals:', err);
       setMeals([]);
@@ -533,9 +535,9 @@ export default function Diary() {
     { calories: 0, protein: 0, carbs: 0, fat: 0 }
   );
 
-  const calorieGoal = 2500;
+  const calorieGoal = goals.calories;
   const remaining = Math.max(calorieGoal - totals.calories, 0);
-  const progress = Math.min(totals.calories / calorieGoal, 1);
+  const progress = calorieGoal > 0 ? Math.min(totals.calories / calorieGoal, 1) : 0;
 
   // Populated categories
   const populatedCats = CATEGORIES.filter((cat) => grouped[cat.key].length > 0);

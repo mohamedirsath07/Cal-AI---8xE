@@ -29,6 +29,7 @@ import Svg, {
   Rect,
 } from 'react-native-svg';
 import { getWeeklyStats } from '../../lib/storage';
+import { loadGoals } from '../../lib/goals';
 import dayjs from 'dayjs';
 
 const { width: SCREEN_W } = Dimensions.get('window');
@@ -54,7 +55,7 @@ const C = {
   text3: 'rgba(255,255,255,0.35)',
 };
 
-const CALORIE_GOAL = 2500;
+const DEFAULT_CALORIE_GOAL = 2500;
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -151,8 +152,8 @@ function StatCard({ icon, label, value, sub, color, delay }: StatCardProps) {
 // ─── Day Breakdown Row ────────────────────────────────────────────────────────
 
 function DayRow({ data, isHighest, isLowest }: { data: DayData; isHighest: boolean; isLowest: boolean }) {
-  const pct = Math.min(data.calories / CALORIE_GOAL, 1);
-  const overGoal = data.calories > CALORIE_GOAL;
+  const pct = calorieGoal > 0 ? Math.min(data.calories / calorieGoal, 1) : 0;
+  const overGoal = data.calories > calorieGoal;
 
   return (
     <View
@@ -241,10 +242,13 @@ export default function History() {
   const [isLoading, setIsLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [usingMock, setUsingMock] = useState(false);
+  const [calorieGoal, setCalorieGoal] = useState(DEFAULT_CALORIE_GOAL);
 
   // ── Load Data ──
   const loadData = useCallback(async () => {
     try {
+      const g = await loadGoals();
+      setCalorieGoal(g.calories);
       const stats = await getWeeklyStats();
 
       // Check if storage has any real data
@@ -313,8 +317,8 @@ export default function History() {
 
   // Chart data for Victory
   const chartData = weekData.map((d) => ({ x: d.index, y: d.calories, label: d.dayLabel }));
-  const goalLineData = weekData.map((d) => ({ x: d.index, y: CALORIE_GOAL }));
-  const yMax = Math.max(highest, CALORIE_GOAL) + 300;
+  const goalLineData = weekData.map((d) => ({ x: d.index, y: calorieGoal }));
+  const yMax = Math.max(highest, calorieGoal) + 300;
 
   // Macro averages
   const avgProtein = weekData.length > 0 ? Math.round(weekData.reduce((s, d) => s + d.protein, 0) / weekData.length) : 0;
@@ -501,7 +505,7 @@ export default function History() {
                           style={{
                             data: {
                               fill: ({ datum }: any) =>
-                                datum.y > CALORIE_GOAL ? C.warning : 'url(#barGrad)',
+                                datum.y > calorieGoal ? C.warning : 'url(#barGrad)',
                             },
                           }}
                           animate={{
@@ -531,7 +535,7 @@ export default function History() {
                     </View>
                     <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
                       <View style={{ width: 10, height: 3, borderRadius: 1, backgroundColor: 'rgba(255,255,255,0.20)' }} />
-                      <Text style={{ fontSize: 11, color: C.text3 }}>Goal ({CALORIE_GOAL.toLocaleString()})</Text>
+                      <Text style={{ fontSize: 11, color: C.text3 }}>Goal ({calorieGoal.toLocaleString()})</Text>
                     </View>
                     <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
                       <View style={{ width: 10, height: 10, borderRadius: 3, backgroundColor: C.warning }} />
@@ -554,7 +558,7 @@ export default function History() {
               icon="chart-line"
               label="Avg / Day"
               value={average.toLocaleString()}
-              sub={`${Math.round((average / CALORIE_GOAL) * 100)}% of goal`}
+              sub={`${calorieGoal > 0 ? Math.round((average / calorieGoal) * 100) : 0}% of goal`}
               color={C.accent}
               delay={100}
             />

@@ -1,4 +1,4 @@
-import React, { useEffect, useRef } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
   View,
   ScrollView,
@@ -8,10 +8,12 @@ import {
   Animated,
   Platform,
   StatusBar,
+  RefreshControl,
+  ActivityIndicator,
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { BlurView } from 'expo-blur';
-import { useRouter } from 'expo-router';
+import { useRouter, useFocusEffect } from 'expo-router';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import Svg, {
   Circle,
@@ -19,6 +21,13 @@ import Svg, {
   LinearGradient as SvgLinearGradient,
   Stop,
 } from 'react-native-svg';
+import { getTodayMeals, calculateMacros } from '../../lib/storage';
+import { loadGoals, DEFAULT_GOALS } from '../../lib/goals';
+import type { NutritionGoals } from '../../lib/goals';
+import { getStreak, getWeekActivity } from '../../services/streak';
+import type { StreakData } from '../../services/streak';
+import type { Meal } from '../../types';
+import dayjs from 'dayjs';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
 
@@ -48,76 +57,7 @@ const COLORS = {
   gray500: 'rgba(255,255,255,0.08)',
 };
 
-// ─── Mock Data ────────────────────────────────────────────────────────────────
-
-const MOCK = {
-  userName: 'Alex',
-  calories: { current: 1847, goal: 2500 },
-  protein: { current: 124, goal: 150, unit: 'g' },
-  carbs: { current: 198, goal: 280, unit: 'g' },
-  fat: { current: 58, goal: 85, unit: 'g' },
-  streak: { current: 14, best: 21 },
-  weekActivity: [true, true, true, false, true, true, true], // Mon–Sun
-  meals: [
-    {
-      id: '1',
-      name: 'Grilled Salmon Bowl',
-      emoji: '🍣',
-      calories: 520,
-      protein: 42,
-      carbs: 38,
-      fat: 22,
-      time: '12:30 PM',
-      timeAgo: '1h ago',
-    },
-    {
-      id: '2',
-      name: 'Greek Yogurt Parfait',
-      emoji: '🥣',
-      calories: 310,
-      protein: 28,
-      carbs: 34,
-      fat: 8,
-      time: '9:15 AM',
-      timeAgo: '4h ago',
-    },
-    {
-      id: '3',
-      name: 'Protein Smoothie',
-      emoji: '🥤',
-      calories: 280,
-      protein: 32,
-      carbs: 24,
-      fat: 6,
-      time: '7:45 AM',
-      timeAgo: '6h ago',
-    },
-    {
-      id: '4',
-      name: 'Chicken Caesar Wrap',
-      emoji: '🌯',
-      calories: 420,
-      protein: 36,
-      carbs: 32,
-      fat: 16,
-      time: 'Yesterday',
-      timeAgo: 'Yesterday',
-    },
-    {
-      id: '5',
-      name: 'Overnight Oats',
-      emoji: '🥣',
-      calories: 317,
-      protein: 14,
-      carbs: 48,
-      fat: 9,
-      time: 'Yesterday',
-      timeAgo: 'Yesterday',
-    },
-  ],
-};
-
-// ─── Helper ───────────────────────────────────────────────────────────────────
+// ─── Helpers ──────────────────────────────────────────────────────────────────
 
 function getGreeting(): string {
   const h = new Date().getHours();
@@ -128,6 +68,63 @@ function getGreeting(): string {
 
 function formatNum(n: number): string {
   return n.toLocaleString();
+}
+
+/** Sum macros across all foods in a meal. */
+function mealMacros(meal: Meal) {
+  return meal.foods.reduce(
+    (acc, f) => ({
+      protein: acc.protein + (f.protein || 0),
+      carbs: acc.carbs + (f.carbs || 0),
+      fat: acc.fat + (f.fat || 0),
+    }),
+    { protein: 0, carbs: 0, fat: 0 },
+  );
+}
+
+/** Pick an emoji based on food name keywords. */
+function getFoodEmoji(name: string): string {
+  const n = name.toLowerCase();
+  if (n.includes('chicken')) return '🍗';
+  if (n.includes('rice') || n.includes('biryani')) return '🍚';
+  if (n.includes('salad')) return '🥗';
+  if (n.includes('burger')) return '🍔';
+  if (n.includes('pizza')) return '🍕';
+  if (n.includes('sandwich') || n.includes('wrap')) return '🌯';
+  if (n.includes('pasta') || n.includes('noodle')) return '🍝';
+  if (n.includes('soup')) return '🍲';
+  if (n.includes('egg')) return '🥚';
+  if (n.includes('bread') || n.includes('toast')) return '🍞';
+  if (n.includes('fish') || n.includes('salmon') || n.includes('tuna')) return '🐟';
+  if (n.includes('fruit') || n.includes('apple') || n.includes('banana')) return '🍎';
+  if (n.includes('smoothie') || n.includes('shake') || n.includes('juice')) return '🥤';
+  if (n.includes('yogurt') || n.includes('oat') || n.includes('cereal')) return '🥣';
+  if (n.includes('steak') || n.includes('beef') || n.includes('meat')) return '🥩';
+  if (n.includes('cake') || n.includes('dessert') || n.includes('sweet')) return '🍰';
+  if (n.includes('coffee') || n.includes('tea')) return '☕';
+  if (n.includes('milk')) return '🥛';
+  if (n.includes('dosa') || n.includes('idli') || n.includes('paratha')) return '🫓';
+  if (n.includes('curry') || n.includes('dal')) return '🍛';
+  return '🍽️';
+}
+
+/** Relative time string from an HH:mm time on today. */
+function getTimeAgo(timeStr: string): string {
+  const parts = timeStr.split(':');
+  const hours = parseInt(parts[0], 10);
+  const minutes = parseInt(parts[1], 10);
+  if (isNaN(hours) || isNaN(minutes)) return timeStr;
+
+  const now = dayjs();
+  const mealTime = dayjs().hour(hours).minute(minutes).second(0);
+
+  if (mealTime.isAfter(now)) return timeStr;
+
+  const diffMinutes = now.diff(mealTime, 'minute');
+  if (diffMinutes < 1) return 'Just now';
+  if (diffMinutes < 60) return `${diffMinutes}m ago`;
+  const diffHours = Math.floor(diffMinutes / 60);
+  return `${diffHours}h ago`;
 }
 
 // ─── Animated Calorie Ring ────────────────────────────────────────────────────
@@ -143,7 +140,7 @@ const RING_RADIUS = (RING_SIZE - RING_STROKE) / 2;
 const RING_CIRCUMFERENCE = 2 * Math.PI * RING_RADIUS;
 
 function CalorieRing({ current, goal }: CalorieRingProps) {
-  const progress = Math.min(current / goal, 1);
+  const progress = goal > 0 ? Math.min(current / goal, 1) : 0;
   const dashOffset = RING_CIRCUMFERENCE * (1 - progress);
   const fadeAnim = useRef(new Animated.Value(0)).current;
   const scaleAnim = useRef(new Animated.Value(0.9)).current;
@@ -210,7 +207,17 @@ function CalorieRing({ current, goal }: CalorieRingProps) {
         </Svg>
 
         {/* Center Label */}
-        <View className="absolute inset-0 items-center justify-center">
+        <View
+          style={{
+            position: 'absolute',
+            top: 0,
+            left: 0,
+            right: 0,
+            bottom: 0,
+            alignItems: 'center',
+            justifyContent: 'center',
+          }}
+        >
           <Text
             style={{
               fontSize: 44,
@@ -266,7 +273,7 @@ function MacroProgressRing({
   gradientEnd,
   delay = 0,
 }: MacroRingProps) {
-  const progress = Math.min(current / goal, 1);
+  const progress = goal > 0 ? Math.min(current / goal, 1) : 0;
   const dashOffset = MACRO_CIRCUMFERENCE * (1 - progress);
   const percentage = Math.round(progress * 100);
   const gradientId = `macro_${label}`;
@@ -350,7 +357,17 @@ function MacroProgressRing({
           />
         </Svg>
 
-        <View className="absolute inset-0 items-center justify-center">
+        <View
+          style={{
+            position: 'absolute',
+            top: 0,
+            left: 0,
+            right: 0,
+            bottom: 0,
+            alignItems: 'center',
+            justifyContent: 'center',
+          }}
+        >
           <Text style={{ fontSize: 18, fontWeight: '700', color: COLORS.white }}>
             {current}
           </Text>
@@ -435,8 +452,15 @@ function StreakCard({ streak, best, weekActivity }: StreakCardProps) {
           >
             <View style={{ padding: 20 }}>
               {/* Top row */}
-              <View className="flex-row items-center justify-between mb-5">
-                <View className="flex-row items-center" style={{ gap: 14 }}>
+              <View
+                style={{
+                  flexDirection: 'row',
+                  alignItems: 'center',
+                  justifyContent: 'space-between',
+                  marginBottom: 20,
+                }}
+              >
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 14 }}>
                   <View
                     style={{
                       width: 52,
@@ -455,7 +479,7 @@ function StreakCard({ streak, best, weekActivity }: StreakCardProps) {
                     <Text style={{ fontSize: 13, color: COLORS.gray300, fontWeight: '500' }}>
                       Current Streak
                     </Text>
-                    <View className="flex-row items-baseline" style={{ gap: 4 }}>
+                    <View style={{ flexDirection: 'row', alignItems: 'baseline', gap: 4 }}>
                       <Text
                         style={{
                           fontSize: 32,
@@ -490,8 +514,9 @@ function StreakCard({ streak, best, weekActivity }: StreakCardProps) {
 
               {/* Week dots */}
               <View
-                className="flex-row justify-between"
                 style={{
+                  flexDirection: 'row',
+                  justifyContent: 'space-between',
                   backgroundColor: COLORS.gray500,
                   borderRadius: 14,
                   paddingVertical: 12,
@@ -589,9 +614,9 @@ function MealItem({ emoji, name, calories, protein, carbs, fat, timeAgo, index }
               end={{ x: 1, y: 1 }}
             >
               <View style={{ padding: 16 }}>
-                <View className="flex-row items-center justify-between">
+                <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
                   {/* Left side */}
-                  <View className="flex-row items-center flex-1" style={{ gap: 14 }}>
+                  <View style={{ flexDirection: 'row', alignItems: 'center', flex: 1, gap: 14 }}>
                     <View
                       style={{
                         width: 48,
@@ -638,7 +663,7 @@ function MealItem({ emoji, name, calories, protein, carbs, fat, timeAgo, index }
                 </View>
 
                 {/* Macro pills */}
-                <View className="flex-row" style={{ gap: 8, marginTop: 12 }}>
+                <View style={{ flexDirection: 'row', gap: 8, marginTop: 12 }}>
                   <MacroPill label="P" value={protein} color={COLORS.protein} />
                   <MacroPill label="C" value={carbs} color={COLORS.carbs} />
                   <MacroPill label="F" value={fat} color={COLORS.fat} />
@@ -714,14 +739,121 @@ function QuickStat({ icon, label, value, color }: QuickStatProps) {
   );
 }
 
+// ─── Empty Meals State ────────────────────────────────────────────────────────
+
+function EmptyMealsState({ onAddMeal }: { onAddMeal: () => void }) {
+  return (
+    <View style={{ alignItems: 'center', paddingVertical: 40, paddingHorizontal: 24 }}>
+      <View
+        style={{
+          width: 64,
+          height: 64,
+          borderRadius: 32,
+          backgroundColor: COLORS.gray500,
+          borderWidth: 1,
+          borderColor: COLORS.cardBorder,
+          alignItems: 'center',
+          justifyContent: 'center',
+          marginBottom: 16,
+        }}
+      >
+        <MaterialCommunityIcons name="food-off" size={28} color={COLORS.gray300} />
+      </View>
+      <Text style={{ fontSize: 16, fontWeight: '700', color: COLORS.white, marginBottom: 6 }}>
+        No meals yet today
+      </Text>
+      <Text
+        style={{
+          fontSize: 13,
+          color: COLORS.gray300,
+          textAlign: 'center',
+          lineHeight: 19,
+          marginBottom: 20,
+        }}
+      >
+        Scan your first meal to start tracking
+      </Text>
+      <TouchableOpacity onPress={onAddMeal} activeOpacity={0.85}>
+        <LinearGradient
+          colors={['#FF6B6B', '#FF5252', '#E84393']}
+          start={{ x: 0, y: 0 }}
+          end={{ x: 1, y: 1 }}
+          style={{
+            flexDirection: 'row',
+            alignItems: 'center',
+            gap: 8,
+            paddingHorizontal: 24,
+            paddingVertical: 12,
+            borderRadius: 14,
+          }}
+        >
+          <MaterialCommunityIcons name="camera-plus" size={18} color={COLORS.white} />
+          <Text style={{ fontSize: 14, fontWeight: '700', color: COLORS.white }}>Add Meal</Text>
+        </LinearGradient>
+      </TouchableOpacity>
+    </View>
+  );
+}
+
 // ─── Dashboard Screen ─────────────────────────────────────────────────────────
 
 export default function Dashboard() {
   const router = useRouter();
 
-  const { calories, protein, carbs, fat, streak, weekActivity, meals, userName } = MOCK;
-  const remaining = Math.max(calories.goal - calories.current, 0);
-  const burned = 340; // mock exercise burn
+  // ── State ──
+  const [isLoading, setIsLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
+  const [meals, setMeals] = useState<Meal[]>([]);
+  const [goals, setGoals] = useState<NutritionGoals>(DEFAULT_GOALS);
+  const [streakData, setStreakData] = useState<StreakData>({
+    currentStreak: 0,
+    bestStreak: 0,
+    lastLoggedDate: null,
+    loggedToday: false,
+  });
+  const [weekActivity, setWeekActivity] = useState<boolean[]>([
+    false, false, false, false, false, false, false,
+  ]);
+
+  // ── Load Data ──
+  const loadData = useCallback(async () => {
+    try {
+      const [todayMeals, streak, activity, g] = await Promise.all([
+        getTodayMeals(),
+        getStreak(),
+        getWeekActivity(),
+        loadGoals(),
+      ]);
+      setMeals(todayMeals);
+      setStreakData(streak);
+      setWeekActivity(activity);
+      setGoals(g);
+    } catch (err) {
+      console.error('Dashboard load error:', err);
+    } finally {
+      setIsLoading(false);
+      setRefreshing(false);
+    }
+  }, []);
+
+  useFocusEffect(
+    useCallback(() => {
+      loadData();
+    }, [loadData]),
+  );
+
+  const onRefresh = useCallback(() => {
+    setRefreshing(true);
+    loadData();
+  }, [loadData]);
+
+  // ── Computed Values ──
+  const macros = calculateMacros(meals);
+  const caloriesCurrent = macros.calories;
+  const proteinCurrent = Math.round(macros.protein);
+  const carbsCurrent = Math.round(macros.carbs);
+  const fatCurrent = Math.round(macros.fat);
+  const remaining = Math.max(goals.calories - caloriesCurrent, 0);
 
   // Pulsing FAB animation
   const pulseAnim = useRef(new Animated.Value(1)).current;
@@ -738,22 +870,25 @@ export default function Dashboard() {
           duration: 1200,
           useNativeDriver: true,
         }),
-      ])
+      ]),
     ).start();
   }, []);
 
   return (
-    <View className="flex-1" style={{ backgroundColor: COLORS.bg }}>
+    <View style={{ flex: 1, backgroundColor: COLORS.bg }}>
       <StatusBar barStyle="light-content" />
 
       <ScrollView
-        className="flex-1"
+        style={{ flex: 1 }}
         showsVerticalScrollIndicator={false}
         contentContainerStyle={{ paddingBottom: 100 }}
+        refreshControl={
+          <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={COLORS.accent} />
+        }
       >
         {/* ───── Header ───── */}
         <View style={{ paddingHorizontal: 24, paddingTop: Platform.OS === 'ios' ? 60 : 48, paddingBottom: 8 }}>
-          <View className="flex-row justify-between items-center">
+          <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
             <View>
               <Text style={{ fontSize: 14, color: COLORS.gray300, fontWeight: '500' }}>
                 {getGreeting()} 👋
@@ -767,10 +902,10 @@ export default function Dashboard() {
                   letterSpacing: -0.5,
                 }}
               >
-                {userName}
+                Dashboard
               </Text>
             </View>
-            <View className="flex-row" style={{ gap: 10 }}>
+            <View style={{ flexDirection: 'row', gap: 10 }}>
               <TouchableOpacity
                 style={{
                   width: 44,
@@ -837,12 +972,18 @@ export default function Dashboard() {
                     TODAY'S INTAKE
                   </Text>
 
-                  <CalorieRing current={calories.current} goal={calories.goal} />
+                  {isLoading ? (
+                    <View style={{ width: RING_SIZE, height: RING_SIZE, alignItems: 'center', justifyContent: 'center' }}>
+                      <ActivityIndicator size="large" color={COLORS.accent} />
+                    </View>
+                  ) : (
+                    <CalorieRing current={caloriesCurrent} goal={goals.calories} />
+                  )}
 
                   {/* Stats row under ring */}
                   <View
-                    className="flex-row"
                     style={{
+                      flexDirection: 'row',
                       gap: 10,
                       marginTop: 24,
                       width: '100%',
@@ -851,7 +992,7 @@ export default function Dashboard() {
                     <QuickStat
                       icon="flag-checkered"
                       label="Goal"
-                      value={`${formatNum(calories.goal)}`}
+                      value={`${formatNum(goals.calories)}`}
                       color={COLORS.success}
                     />
                     <QuickStat
@@ -861,9 +1002,9 @@ export default function Dashboard() {
                       color={COLORS.carbs}
                     />
                     <QuickStat
-                      icon="fire"
-                      label="Burned"
-                      value={`${burned}`}
+                      icon="food"
+                      label="Meals"
+                      value={`${meals.length}`}
                       color={COLORS.accent}
                     />
                   </View>
@@ -897,12 +1038,16 @@ export default function Dashboard() {
           >
             <BlurView intensity={15} tint="dark">
               <View
-                className="flex-row justify-around"
-                style={{ paddingVertical: 24, paddingHorizontal: 12 }}
+                style={{
+                  flexDirection: 'row',
+                  justifyContent: 'space-around',
+                  paddingVertical: 24,
+                  paddingHorizontal: 12,
+                }}
               >
                 <MacroProgressRing
-                  current={protein.current}
-                  goal={protein.goal}
+                  current={proteinCurrent}
+                  goal={goals.protein}
                   label="Protein"
                   unit="g"
                   color={COLORS.protein}
@@ -911,8 +1056,8 @@ export default function Dashboard() {
                   delay={100}
                 />
                 <MacroProgressRing
-                  current={carbs.current}
-                  goal={carbs.goal}
+                  current={carbsCurrent}
+                  goal={goals.carbs}
                   label="Carbs"
                   unit="g"
                   color={COLORS.carbs}
@@ -921,8 +1066,8 @@ export default function Dashboard() {
                   delay={200}
                 />
                 <MacroProgressRing
-                  current={fat.current}
-                  goal={fat.goal}
+                  current={fatCurrent}
+                  goal={goals.fat}
                   label="Fat"
                   unit="g"
                   color={COLORS.fat}
@@ -950,15 +1095,22 @@ export default function Dashboard() {
           </Text>
 
           <StreakCard
-            streak={streak.current}
-            best={streak.best}
+            streak={streakData.currentStreak}
+            best={streakData.bestStreak}
             weekActivity={weekActivity}
           />
         </View>
 
         {/* ───── Recent Meals ───── */}
         <View style={{ paddingHorizontal: 24, marginTop: 28 }}>
-          <View className="flex-row justify-between items-center" style={{ marginBottom: 18 }}>
+          <View
+            style={{
+              flexDirection: 'row',
+              justifyContent: 'space-between',
+              alignItems: 'center',
+              marginBottom: 18,
+            }}
+          >
             <Text
               style={{
                 fontSize: 12,
@@ -971,8 +1123,7 @@ export default function Dashboard() {
             </Text>
             <TouchableOpacity
               onPress={() => router.push('/(tabs)/diary')}
-              className="flex-row items-center"
-              style={{ gap: 4 }}
+              style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}
             >
               <Text style={{ fontSize: 13, fontWeight: '600', color: COLORS.accent }}>
                 View All
@@ -981,19 +1132,33 @@ export default function Dashboard() {
             </TouchableOpacity>
           </View>
 
-          {meals.map((meal, index) => (
-            <MealItem
-              key={meal.id}
-              emoji={meal.emoji}
-              name={meal.name}
-              calories={meal.calories}
-              protein={meal.protein}
-              carbs={meal.carbs}
-              fat={meal.fat}
-              timeAgo={meal.timeAgo}
-              index={index}
-            />
-          ))}
+          {isLoading ? (
+            <View style={{ alignItems: 'center', paddingVertical: 40 }}>
+              <ActivityIndicator size="small" color={COLORS.gray300} />
+              <Text style={{ fontSize: 13, color: COLORS.gray300, marginTop: 10 }}>
+                Loading meals…
+              </Text>
+            </View>
+          ) : meals.length === 0 ? (
+            <EmptyMealsState onAddMeal={() => router.push('/camera')} />
+          ) : (
+            meals.map((meal, index) => {
+              const macroValues = mealMacros(meal);
+              return (
+                <MealItem
+                  key={meal.id}
+                  emoji={getFoodEmoji(meal.name)}
+                  name={meal.name}
+                  calories={meal.totalCalories}
+                  protein={Math.round(macroValues.protein)}
+                  carbs={Math.round(macroValues.carbs)}
+                  fat={Math.round(macroValues.fat)}
+                  timeAgo={getTimeAgo(meal.time)}
+                  index={index}
+                />
+              );
+            })
+          )}
         </View>
       </ScrollView>
 
